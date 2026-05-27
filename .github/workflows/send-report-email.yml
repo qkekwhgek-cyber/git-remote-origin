@@ -1,0 +1,42 @@
+name: Send Daily Report Email
+
+on:
+  push:
+    paths:
+      - 'daily-reports/**.md'
+
+jobs:
+  send-email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get report file path
+        id: report
+        run: |
+          FILE=$(git diff-tree --no-commit-id -r --name-only ${{ github.sha }} | grep '^daily-reports/' | head -1)
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          echo "date=$(basename $FILE .md)" >> $GITHUB_OUTPUT
+
+      - name: Read report content
+        id: content
+        run: |
+          CONTENT=$(cat "${{ steps.report.outputs.file }}")
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$CONTENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Send email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USER }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "일일 트렌드 리포트 - ${{ steps.report.outputs.date }}"
+          to: ${{ secrets.GMAIL_USER }}
+          from: ${{ secrets.GMAIL_USER }}
+          body: ${{ steps.content.outputs.body }}
+          content_type: text/plain
