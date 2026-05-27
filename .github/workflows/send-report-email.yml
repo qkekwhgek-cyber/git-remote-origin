@@ -12,31 +12,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get report file path
-        id: report
-        run: |
-          FILE=$(git diff-tree --no-commit-id -r --name-only ${{ github.sha }} | grep '^daily-reports/' | head -1)
-          echo "file=$FILE" >> $GITHUB_OUTPUT
-          echo "date=$(basename $FILE .md)" >> $GITHUB_OUTPUT
-
-      - name: Read report content
-        id: content
-        run: |
-          CONTENT=$(cat "${{ steps.report.outputs.file }}")
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          echo "$CONTENT" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
       - name: Send email
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          secure: true
-          username: ${{ secrets.GMAIL_USER }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: "일일 트렌드 리포트 - ${{ steps.report.outputs.date }}"
-          to: ${{ secrets.GMAIL_USER }}
-          from: ${{ secrets.GMAIL_USER }}
-          body: ${{ steps.content.outputs.body }}
-          content_type: text/plain
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          FILE=$(git diff-tree --no-commit-id -r --name-only $COMMIT_SHA | grep '^daily-reports/' | head -1)
+          DATE=$(basename $FILE .md)
+          export FILE DATE
+          python3 - << 'PYEOF'
+          import smtplib, os
+          from email.mime.text import MIMEText
+
+          user = os.environ['GMAIL_USER']
+          password = os.environ['GMAIL_PASSWORD']
+          file_path = os.environ['FILE']
+          date = os.environ['DATE']
+
+          with open(file_path, 'r', encoding='utf-8') as f:
+              content = f.read()
+
+          msg = MIMEText(content, 'plain', 'utf-8')
+          msg['Subject'] = f'일일 트렌드 리포트 - {date}'
+          msg['From'] = user
+          msg['To'] = user
+
+          with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+              smtp.login(user, password)
+              smtp.send_message(msg)
+
+          print(f"Email sent: {date}")
+          PYEOF
