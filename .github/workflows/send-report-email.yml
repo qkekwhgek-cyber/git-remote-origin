@@ -43,8 +43,10 @@ jobs:
               body = json.dumps({"mode": "user", "usernames": ["choi.openai"], "max_posts": 50}).encode()
               req = urllib.request.Request(run_url, data=body, headers={"Content-Type": "application/json"}, method="POST")
               with urllib.request.urlopen(req, timeout=30) as resp:
-                  run_id = json.loads(resp.read())["data"]["id"]
-              print(f"Apify run started: {run_id}")
+                  run_init = json.loads(resp.read())["data"]
+                  run_id = run_init["id"]
+                  dataset_id = run_init["defaultDatasetId"]
+              print(f"Apify run started: {run_id}, dataset: {dataset_id}")
 
               for _ in range(30):
                   time.sleep(10)
@@ -56,7 +58,7 @@ jobs:
                       break
 
               if run_data["status"] == "SUCCEEDED":
-                  items_url = f"https://api.apify.com/v2/acts/lct1dlYksEDIG9If9/runs/{run_id}/dataset/items?token={apify_token}&limit=200"
+                  items_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={apify_token}&limit=200"
                   with urllib.request.urlopen(items_url, timeout=30) as resp:
                       items = json.loads(resp.read())
 
