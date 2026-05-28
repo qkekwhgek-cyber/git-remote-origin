@@ -12,25 +12,85 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Send email
+      - name: Send enriched email
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: |
-          FILE=$(ls -t daily-reports/*.md | head -1)
+          FILE=$(git show --name-only --format="" HEAD | grep "^daily-reports/" | head -1)
           DATE=$(basename "$FILE" .md)
           export FILE DATE
           python3 - << 'PYEOF'
-          import smtplib, os
+          import smtplib, os, json, time, urllib.request, re
           from email.mime.text import MIMEText
+          from datetime import datetime, timedelta, timezone
 
           user = os.environ['GMAIL_USER']
           password = os.environ['GMAIL_PASSWORD']
           file_path = os.environ['FILE']
           date = os.environ['DATE']
+          apify_token = os.environ['APIFY_TOKEN']
 
           with open(file_path, 'r', encoding='utf-8') as f:
               content = f.read()
+
+          # Fetch @choi.openai posts via Apify (no network restrictions in GitHub Actions)
+          threads_lines = []
+          try:
+              run_url = f"https://api.apify.com/v2/acts/lct1dlYksEDIG9If9/runs?token={apify_token}"
+              body = json.dumps({"mode": "user", "usernames": ["choi.openai"], "max_posts": 50}).encode()
+              req = urllib.request.Request(run_url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  run_id = json.loads(resp.read())["data"]["id"]
+              print(f"Apify run started: {run_id}")
+
+              for _ in range(30):
+                  time.sleep(10)
+                  status_url = f"https://api.apify.com/v2/acts/lct1dlYksEDIG9If9/runs/{run_id}?token={apify_token}"
+                  with urllib.request.urlopen(status_url, timeout=30) as resp:
+                      run_data = json.loads(resp.read())["data"]
+                  print(f"Status: {run_data['status']}")
+                  if run_data["status"] in ("SUCCEEDED", "FAILED", "ABORTED", "TIMED-OUT"):
+                      break
+
+              if run_data["status"] == "SUCCEEDED":
+                  items_url = f"https://api.apify.com/v2/acts/lct1dlYksEDIG9If9/runs/{run_id}/dataset/items?token={apify_token}&limit=200"
+                  with urllib.request.urlopen(items_url, timeout=30) as resp:
+                      items = json.loads(resp.read())
+
+                  cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+                  recent = []
+                  for item in items:
+                      text = str(item.get("text_content", "")).replace("\n", " ")[:200]
+                      post_code = item.get("post_code", "")
+                      username = item.get("username", "choi.openai")
+                      url = f"https://www.threads.com/@{username}/post/{post_code}" if post_code else ""
+                      created_at = item.get("created_at", "")
+                      try:
+                          ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                          if ts.tzinfo is None:
+                              ts = ts.replace(tzinfo=timezone.utc)
+                          if ts >= cutoff:
+                              recent.append((ts, text, url))
+                      except:
+                          pass
+                  recent.sort(key=lambda x: x[0], reverse=True)
+                  threads_lines = [f"{i+1}. {t} — {u}" for i, (_, t, u) in enumerate(recent)]
+
+                  if not threads_lines and items:
+                      threads_lines = [
+                          f"{i+1}. {str(item.get('text_content','')).replace(chr(10),' ')[:200]} — https://www.threads.com/@{item.get('username','choi.openai')}/post/{item.get('post_code','')}"
+                          for i, item in enumerate(items[:5])
+                      ]
+
+          except Exception as e:
+              print(f"Apify error: {e}")
+
+          # Replace @choi.openai section in content
+          threads_body = "\n".join(threads_lines) if threads_lines else "*(게시물을 가져오지 못했습니다)*"
+          new_section = f"## 📱 @choi.openai 오늘의 스레드\n\n{threads_body}\n"
+          content = re.sub(r'## 📱 @choi\.openai 오늘의 스레드.*', new_section, content, flags=re.DOTALL)
 
           msg = MIMEText(content, 'plain', 'utf-8')
           msg['Subject'] = f'일일 트렌드 리포트 - {date}'
@@ -40,6 +100,5 @@ jobs:
           with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
               smtp.login(user, password)
               smtp.send_message(msg)
-
           print(f"Email sent: {date}")
           PYEOF
