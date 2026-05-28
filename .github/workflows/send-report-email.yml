@@ -12,33 +12,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fetch Apify threads data
-        env:
-          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-        run: |
-          echo "Starting Apify run..."
-          RUN_JSON=$(curl -sf -X POST \
-            "https://api.apify.com/v2/acts/lct1dlYksEDIG9If9/runs?token=$APIFY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"mode": "user", "usernames": ["choi.openai"], "max_posts": 50}')
-          RUN_ID=$(echo "$RUN_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
-          DATASET_ID=$(echo "$RUN_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['defaultDatasetId'])")
-          echo "Run ID: $RUN_ID | Dataset: $DATASET_ID"
-          for i in $(seq 1 30); do
-            sleep 10
-            STATUS=$(curl -sf "https://api.apify.com/v2/acts/lct1dlYksEDIG9If9/runs/$RUN_ID?token=$APIFY_TOKEN" \
-              | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['status'])")
-            echo "[$i] $STATUS"
-            [ "$STATUS" = "SUCCEEDED" ] && break
-            [ "$STATUS" = "FAILED" ] && break
-          done
-          if [ "$STATUS" = "SUCCEEDED" ]; then
-            curl -sf "https://api.apify.com/v2/datasets/$DATASET_ID/items?token=$APIFY_TOKEN&limit=200" > /tmp/threads_items.json
-            echo "Items: $(python3 -c "import json; print(len(json.load(open('/tmp/threads_items.json'))))")"
-          else
-            echo "[]" > /tmp/threads_items.json
-          fi
-
       - name: Send email
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
@@ -47,61 +20,23 @@ jobs:
           FILE=$(ls daily-reports/*.md | sort | tail -1)
           DATE=$(basename "$FILE" .md)
           echo "Sending: $FILE"
-          export FILE DATE
-          python3 - << 'PYEOF'
-          import smtplib, os, json, re
-          from email.mime.text import MIMEText
-          from datetime import datetime, timedelta, timezone
+          python3 -c "
+import smtplib, os
+from email.mime.text import MIMEText
 
-          user = os.environ['GMAIL_USER']
-          password = os.environ['GMAIL_PASSWORD']
-          file_path = os.environ['FILE']
-          date = os.environ['DATE']
+user = os.environ['GMAIL_USER']
+password = os.environ['GMAIL_PASSWORD']
 
-          with open(file_path, 'r', encoding='utf-8') as f:
-              content = f.read()
+with open('$FILE', 'r', encoding='utf-8') as f:
+    content = f.read()
 
-          threads_lines = []
-          try:
-              with open('/tmp/threads_items.json', 'r') as f:
-                  items = json.load(f)
-              cutoff = datetime.now(timezone.utc) - timedelta(days=14)
-              recent = []
-              for item in items:
-                  text = str(item.get('text_content', '')).replace('\n', ' ')[:200]
-                  post_code = item.get('post_code', '')
-                  username = item.get('username', 'choi.openai')
-                  url = f'https://www.threads.com/@{username}/post/{post_code}' if post_code else ''
-                  created_at = item.get('created_at', '')
-                  try:
-                      ts = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                      if ts.tzinfo is None:
-                          ts = ts.replace(tzinfo=timezone.utc)
-                      if ts >= cutoff:
-                          recent.append((ts, text, url))
-                  except:
-                      pass
-              recent.sort(key=lambda x: x[0], reverse=True)
-              threads_lines = [f'{i+1}. {t} — {u}' for i, (_, t, u) in enumerate(recent)]
-              if not threads_lines and items:
-                  threads_lines = [
-                      f'{i+1}. {str(item.get("text_content","")).replace(chr(10)," ")[:200]} — https://www.threads.com/@{item.get("username","choi.openai")}/post/{item.get("post_code","")}'
-                      for i, item in enumerate(items[:5])
-                  ]
-          except Exception as e:
-              print(f'Threads error: {e}')
+msg = MIMEText(content, 'plain', 'utf-8')
+msg['Subject'] = '일일 트렌드 리포트 - $DATE'
+msg['From'] = user
+msg['To'] = user
 
-          threads_body = '\n'.join(threads_lines) if threads_lines else '*(게시물을 가져오지 못했습니다)*'
-          new_section = '## \U0001f4f1 @choi.openai 오늘의 스레드\n\n' + threads_body + '\n'
-          content = re.sub(r'## \U0001f4f1 @choi\.openai.*', new_section, content, flags=re.DOTALL)
-
-          msg = MIMEText(content, 'plain', 'utf-8')
-          msg['Subject'] = f'일일 트렌드 리포트 - {date}'
-          msg['From'] = user
-          msg['To'] = user
-
-          with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-              smtp.login(user, password)
-              smtp.send_message(msg)
-          print(f'Email sent: {date}')
-          PYEOF
+with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+    smtp.login(user, password)
+    smtp.send_message(msg)
+print('Email sent: $DATE')
+"
