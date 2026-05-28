@@ -18,9 +18,10 @@ jobs:
           GMAIL_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: |
-          FILE=$(git show --name-only --format="" HEAD | grep "^daily-reports/" | head -1)
+          FILE=$(ls daily-reports/*.md | sort | tail -1)
           DATE=$(basename "$FILE" .md)
           export FILE DATE
+          echo "Selected file: $FILE (date: $DATE)"
           python3 - << 'PYEOF'
           import smtplib, os, json, time, urllib.request, re
           from email.mime.text import MIMEText
