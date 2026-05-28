@@ -16,10 +16,9 @@ jobs:
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          COMMIT_SHA: ${{ github.sha }}
         run: |
-          FILE=$(git show --name-only --format="" $COMMIT_SHA | grep '^daily-reports/' | head -1)
-          DATE=$(basename $FILE .md)
+          FILE=$(ls -t daily-reports/*.md | head -1)
+          DATE=$(basename "$FILE" .md)
           export FILE DATE
           python3 - << 'PYEOF'
           import smtplib, os
