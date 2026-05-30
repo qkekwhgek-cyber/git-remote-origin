@@ -21,16 +21,16 @@ const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
 const REPORTS_DIR = path.join(__dirname, 'daily-reports');
 const THREADS_USER = 'choi.openai';
 
-// 카테고리별 검색 쿼리 (여러 쿼리 결합으로 커버리지 확보)
+// 카테고리별 검색 쿼리 — 분야 소식·출시·인사이트 중심
 const NEWS_CATEGORIES = [
   {
     key: 'ai',
     emoji: '🤖',
     name: 'AI 동향',
     queries: [
-      'AI 인공지능 Claude Anthropic',
-      'ChatGPT OpenAI 에이전트',
-      'AI 트렌드 2026',
+      'Claude Anthropic 발표 출시',
+      'ChatGPT OpenAI 신기능 업데이트',
+      'AI LLM 에이전트 서비스 출시',
     ],
   },
   {
@@ -38,9 +38,9 @@ const NEWS_CATEGORIES = [
     emoji: '🎨',
     name: '브랜딩·디자인',
     queries: [
-      '브랜딩 디자인 트렌드 2026',
-      'brand design identity 2026',
-      '브랜드 마케팅 전략 2026',
+      '브랜딩 전략 디자인 인사이트',
+      'AI 디자인 창작 도구 출시',
+      'brand design trends news 2026',
     ],
   },
   {
@@ -48,9 +48,9 @@ const NEWS_CATEGORIES = [
     emoji: '📊',
     name: '마케팅·퍼널',
     queries: [
-      '광고 퍼포먼스 마케팅',
-      '마케팅 트렌드 2026',
-      '콘텐츠마케팅 디지털 전략',
+      '광고 퍼포먼스 마케팅 전략',
+      'SEO AI 검색 마케팅 인사이트',
+      '디지털마케팅 전략 뉴스',
     ],
   },
 ];
@@ -82,29 +82,6 @@ function fetchUrl(url, timeout = 8000) {
   });
 }
 
-// Google News redirect URL → 실제 기사 URL 추적 (1단계)
-async function resolveRedirect(url) {
-  if (!url.includes('news.google.com')) return url;
-  try {
-    const lib = url.startsWith('https') ? https : http;
-    return await new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(url), 4000);
-      const req = lib.request(url, { method: 'HEAD', headers: { 'User-Agent': 'Mozilla/5.0' } }, (res) => {
-        clearTimeout(timer);
-        const loc = res.headers.location;
-        if (loc && (res.statusCode >= 301 && res.statusCode <= 308)) {
-          resolve(loc.startsWith('http') ? loc : `https://news.google.com${loc}`);
-        } else {
-          resolve(url);
-        }
-      });
-      req.on('error', () => { clearTimeout(timer); resolve(url); });
-      req.end();
-    });
-  } catch {
-    return url;
-  }
-}
 
 function parseRSSItems(xml) {
   const items = [];
@@ -148,19 +125,8 @@ async function fetchCategoryNews(category) {
     await new Promise(r => setTimeout(r, 500));
   }
 
-  // 최신순 정렬 후 상위 N개 선택
   allItems.sort((a, b) => b.pubDate - a.pubDate);
-  const topItems = allItems.slice(0, MAX_NEWS_PER_CATEGORY);
-
-  // Google 리다이렉트 URL → 실제 기사 URL 병렬 해석
-  const resolved = await Promise.all(
-    topItems.map(async (item) => ({
-      ...item,
-      resolvedLink: await resolveRedirect(item.link),
-    }))
-  );
-
-  return resolved;
+  return allItems.slice(0, MAX_NEWS_PER_CATEGORY);
 }
 
 // ── Threads 수집 (Playwright) ──────────────────────────────────────
@@ -272,7 +238,7 @@ function buildNewsSection(category, items) {
   const lines = items.map((item, i) => {
     const dateStr = item.pubDate.toISOString().slice(0, 10);
     const source = item.source ? ` (${item.source})` : '';
-    return `${i + 1}. ${item.cleanTitle}${source} (${dateStr}) — ${item.resolvedLink}`;
+    return `${i + 1}. ${item.cleanTitle}${source} (${dateStr}) — [기사보기](${item.link})`;
   });
   return `## ${category.emoji} ${category.name}\n\n${lines.join('\n')}\n`;
 }
@@ -281,7 +247,7 @@ function buildThreadsSection(posts) {
   if (posts.length === 0) return `## 📱 @choi.openai 오늘의 스레드\n\n(새 게시글 없음)\n`;
   const lines = posts.map((p, i) => {
     const text = p.content.replace(/\s+/g, ' ').trim().slice(0, 300);
-    return `${i + 1}. ${text} — ${p.url}`;
+    return `${i + 1}. ${text} — [스레드보기](${p.url})`;
   });
   return `## 📱 @choi.openai 오늘의 스레드\n\n${lines.join('\n')}\n`;
 }

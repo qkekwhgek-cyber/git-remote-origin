@@ -1,0 +1,3 @@
+@echo off
+cd /D "C:\Users\user\Desktop\claude\branddot_landing"
+node scrape_daily.js >> logs\daily.log 2>&1
