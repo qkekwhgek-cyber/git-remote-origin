@@ -1,0 +1,12 @@
+{
+  "name": "branddot-threads-scraper",
+  "version": "1.0.0",
+  "description": "Daily @choi.openai threads scraper",
+  "type": "commonjs",
+  "scripts": {
+    "scrape": "node scrape_threads.js"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

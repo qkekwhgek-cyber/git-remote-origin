@@ -16,27 +16,4 @@ jobs:
         env:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        run: |
-          FILE=$(ls daily-reports/*.md | sort | tail -1)
-          DATE=$(basename "$FILE" .md)
-          echo "Sending: $FILE"
-          python3 -c "
-import smtplib, os
-from email.mime.text import MIMEText
-
-user = os.environ['GMAIL_USER']
-password = os.environ['GMAIL_PASSWORD']
-
-with open('$FILE', 'r', encoding='utf-8') as f:
-    content = f.read()
-
-msg = MIMEText(content, 'plain', 'utf-8')
-msg['Subject'] = '일일 트렌드 리포트 - $DATE'
-msg['From'] = user
-msg['To'] = user
-
-with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-    smtp.login(user, password)
-    smtp.send_message(msg)
-print('Email sent: $DATE')
-"
+        run: python3 scripts/send_email.py
