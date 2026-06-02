@@ -101,7 +101,7 @@ function parseRSSItems(xml) {
   return items;
 }
 
-async function fetchCategoryNews(category) {
+async function fetchCategoryNews(category, knownTitles) {
   const twoWeeksAgo = getTwoWeeksAgo();
   const allItems = [];
   const seenTitles = new Set();
@@ -113,9 +113,9 @@ async function fetchCategoryNews(category) {
       const items = parseRSSItems(data);
       for (const item of items) {
         if (item.pubDate < twoWeeksAgo) continue;
-        // 제목 기준 중복 제거 (소스 이름 제거 후 비교)
         const cleanTitle = item.title.replace(/\s+-\s+[^-]+$/, '').trim();
         if (seenTitles.has(cleanTitle)) continue;
+        if (knownTitles.has(cleanTitle.toLowerCase())) continue;
         seenTitles.add(cleanTitle);
         allItems.push({ ...item, cleanTitle });
       }
@@ -137,6 +137,31 @@ function extractUrlsFromFile(filePath) {
   return new Set([...matches].map(m => m[0].split('?')[0]));
 }
 
+function extractNewsTitlesFromFile(filePath) {
+  if (!fs.existsSync(filePath)) return new Set();
+  const text = fs.readFileSync(filePath, 'utf-8');
+  const titles = new Set();
+  // 형식: "1. 제목 (출처) (날짜) — [기사보기](URL)"
+  for (const m of text.matchAll(/^\d+\.\s+(.+?)\s+\([^)]*\)\s+\([\d-]+\)\s+—/gm)) {
+    titles.add(m[1].trim().toLowerCase());
+  }
+  return titles;
+}
+
+function collectKnownNewsTitles() {
+  const known = new Set();
+  if (!fs.existsSync(REPORTS_DIR)) return known;
+  const files = fs.readdirSync(REPORTS_DIR)
+    .filter(f => /^\d{4}-\d{2}-\d{2}\.md$/.test(f))
+    .sort()
+    .slice(-DEDUP_LOOKBACK_DAYS);
+  for (const f of files) {
+    extractNewsTitlesFromFile(path.join(REPORTS_DIR, f)).forEach(t => known.add(t));
+  }
+  console.log(`  [뉴스 중복제거] 최근 ${files.length}일치에서 ${known.size}개 제목 로드`);
+  return known;
+}
+
 function collectKnownThreadUrls() {
   const known = new Set();
   if (!fs.existsSync(REPORTS_DIR)) return known;
@@ -152,7 +177,7 @@ function collectKnownThreadUrls() {
     expanded.add(u.replace('threads.com', 'threads.net'));
     expanded.add(u.replace('threads.net', 'threads.com'));
   });
-  console.log(`  [중복제거] 최근 ${files.length}일치에서 ${expanded.size}개 URL 로드`);
+  console.log(`  [스레드 중복제거] 최근 ${files.length}일치에서 ${expanded.size}개 URL 로드`);
   return expanded;
 }
 
@@ -289,11 +314,12 @@ async function main() {
   console.log(`\n====== 데일리 리포트 전체 수집 (${today}) ======`);
 
   // 1. 뉴스 카테고리 수집 (RSS)
+  const knownNewsTitles = collectKnownNewsTitles();
   const newsSections = [];
   for (const category of NEWS_CATEGORIES) {
     console.log(`\n[${category.emoji} ${category.name}] RSS 수집 중...`);
-    const items = await fetchCategoryNews(category);
-    console.log(`  → ${items.length}개 최신 기사 (2주 이내)`);
+    const items = await fetchCategoryNews(category, knownNewsTitles);
+    console.log(`  → ${items.length}개 최신 기사 (2주 이내, 중복 제외)`);
     items.slice(0, 3).forEach(i => console.log(`     [${i.pubDate.toISOString().slice(0, 10)}] ${i.cleanTitle.slice(0, 60)}`));
     newsSections.push(buildNewsSection(category, items));
   }
