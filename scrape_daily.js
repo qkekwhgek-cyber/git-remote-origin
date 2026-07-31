@@ -28,9 +28,10 @@ const NEWS_CATEGORIES = [
     emoji: '🤖',
     name: 'AI 동향',
     queries: [
-      'Claude Anthropic 발표 출시',
-      'ChatGPT OpenAI 신기능 업데이트',
-      'AI LLM 에이전트 서비스 출시',
+      'Claude Anthropic',
+      'ChatGPT OpenAI',
+      'Google Gemini AI',
+      'Oracle AI',
     ],
   },
   {
@@ -38,9 +39,10 @@ const NEWS_CATEGORIES = [
     emoji: '🎨',
     name: '브랜딩·디자인',
     queries: [
-      '브랜딩 전략 디자인 인사이트',
-      'AI 디자인 창작 도구 출시',
       'brand design trends news 2026',
+      '리브랜딩',
+      '디자인 트렌드',
+      '브랜드 디자인',
     ],
   },
   {
@@ -48,9 +50,10 @@ const NEWS_CATEGORIES = [
     emoji: '📊',
     name: '마케팅·퍼널',
     queries: [
-      '광고 퍼포먼스 마케팅 전략',
-      'SEO AI 검색 마케팅 인사이트',
       '디지털마케팅 전략 뉴스',
+      '퍼포먼스 마케팅',
+      '콘텐츠 마케팅',
+      'SEO 검색 마케팅',
     ],
   },
 ];
@@ -101,6 +104,23 @@ function parseRSSItems(xml) {
   return items;
 }
 
+// 같은 사건을 다른 매체가 제목만 바꿔 재보도하는 경우를 걸러내기 위한 유사도 판정
+function titleTokens(title) {
+  return title
+    .replace(/[“”"'‘’()[\]…,.!?~\-–—:·]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function isNearDuplicateTitle(a, b) {
+  const setA = new Set(titleTokens(a));
+  const setB = new Set(titleTokens(b));
+  if (setA.size === 0 || setB.size === 0) return false;
+  let overlap = 0;
+  for (const t of setA) if (setB.has(t)) overlap++;
+  return overlap / (setA.size + setB.size - overlap) >= 0.4;
+}
+
 async function fetchCategoryNews(category, knownTitles) {
   const twoWeeksAgo = getTwoWeeksAgo();
   const allItems = [];
@@ -126,7 +146,13 @@ async function fetchCategoryNews(category, knownTitles) {
   }
 
   allItems.sort((a, b) => b.pubDate - a.pubDate);
-  return allItems.slice(0, MAX_NEWS_PER_CATEGORY);
+  const deduped = [];
+  for (const item of allItems) {
+    if (deduped.some(kept => isNearDuplicateTitle(kept.cleanTitle, item.cleanTitle))) continue;
+    deduped.push(item);
+    if (deduped.length >= MAX_NEWS_PER_CATEGORY) break;
+  }
+  return deduped;
 }
 
 // ── Threads 수집 (Playwright) ──────────────────────────────────────
